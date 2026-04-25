@@ -1,0 +1,20 @@
+# Secret keys — NEVER push this
+.env
+
+# Data files — too large for GitHub
+data/raw/
+data/processed/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# VS Code settings
+.vscode/
+
+# Model files (large)
+models/xgboost_model.json
+
+# Charts
+models/results/*.png
