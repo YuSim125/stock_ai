@@ -11,6 +11,7 @@ recommends stock bundles ranked by predicted performance.
 - **Dashboard:** Streamlit
 
 ## Project Structure
+```
 stock-ai/
 ├── pipeline/
 │   ├── fetch_data.py           # Phase 1: data ingestion
@@ -19,6 +20,7 @@ stock-ai/
 │   └── train_model.py          # Phase 3: ML model training
 ├── data/                       # gitignored - generated locally
 └── models/results/             # gitignored - generated locally
+```
 
 ## Phases
 - [x] Phase 1 - Data Pipeline (yFinance + FRED macro data)
