@@ -1,17 +1,17 @@
 {
-  "accuracy": 0.6269,
-  "auc_score": 0.5155,
-  "baseline": 0.6597,
-  "train_rows": 15867,
-  "test_rows": 4329,
+  "accuracy": 0.4998,
+  "auc_score": 0.5288,
+  "baseline": 0.5729,
+  "train_rows": 846020,
+  "test_rows": 239474,
   "features_used": 30,
   "top_5_features": [
     "Inflation_CPI",
+    "Yield_Inverted",
     "Fed_Funds_Rate",
-    "Rate_Change_20d",
     "VIX_Fear_Index",
-    "Unemployment_Rate"
+    "Yield_Curve"
   ],
-  "high_conf_trades": 3304,
-  "high_conf_win_rate": 0.6631
+  "high_conf_trades": 47533,
+  "high_conf_win_rate": 0.6293
 }

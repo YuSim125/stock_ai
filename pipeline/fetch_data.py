@@ -1,9 +1,19 @@
 # ============================================================
-#  fetch_data.py  —  Stock AI Project: Data Pipeline
-#  Pulls stock prices + macro economic data and saves to CSV
+#  fetch_data.py  —  Stock AI Project: Data Pipeline (v2)
+#  EXPANDED TO S&P 500
+#  Pulls all 500 S&P stocks + macro data and saves to CSV
+# ============================================================
+#
+#  HOW TO RUN:
+#  python pipeline/fetch_data.py
+#
+#  ⚠️  This will take 15-25 minutes to download all 500 stocks
+#  Leave it running — it saves progress as it goes so if it
+#  stops you can resume without restarting from scratch
 # ============================================================
 
 import os
+import time
 import pandas as pd
 import yfinance as yf
 from fredapi import Fred
@@ -14,219 +24,253 @@ load_dotenv()
 FRED_API_KEY = os.getenv("FRED_API_KEY")
 
 # ─────────────────────────────────────────────────────────
-#  SETTINGS  —  change these any time
+#  SETTINGS
 # ─────────────────────────────────────────────────────────
 
-# The stocks you want to track
-# Add or remove any ticker symbols you want here
-STOCKS = [
-    "AAPL",  # Apple
-    "MSFT",  # Microsoft
-    "GOOGL", # Google
-    "AMZN",  # Amazon
-    "NVDA",  # Nvidia
-    "JPM",   # JPMorgan (bank)
-    "XOM",   # ExxonMobil (energy)
-    "JNJ",   # Johnson & Johnson (healthcare)
-    "SPY",   # S&P 500 ETF (market benchmark)
-]
-
-# How far back to pull data
 START_DATE = "2015-01-01"
 END_DATE   = "2024-12-31"
-
-# Where to save the data
 OUTPUT_DIR = "data/raw"
+
+# How many seconds to wait between downloads
+# This prevents Yahoo Finance from blocking you for too many requests
+DELAY_BETWEEN_DOWNLOADS = 0.5
+
+
+# ─────────────────────────────────────────────────────────
+#  STEP 0: GET ALL S&P 500 TICKERS AUTOMATICALLY
+#  Wikipedia maintains an up-to-date list of S&P 500 companies
+#  We scrape it so we never have to manually update the list
+# ─────────────────────────────────────────────────────────
+
+def get_sp500_tickers():
+    """
+    Reads S&P 500 tickers from the local sp500_tickers.txt file.
+    """
+    print("📋 Reading S&P 500 tickers from sp500_tickers.txt...")
+
+    with open("sp500_tickers.txt", "r") as f:
+        tickers = [line.strip() for line in f.readlines() if line.strip()]
+
+    print(f"   ✅ Loaded {len(tickers)} tickers\n")
+    return tickers
 
 
 # ─────────────────────────────────────────────────────────
 #  PART 1: PULL STOCK PRICE DATA
-#  For each stock we grab: Open, High, Low, Close, Volume
-#  "Close" is the price at end of each trading day
+#  Downloads each stock one at a time with smart resuming
+#  so you don't lose progress if something interrupts
 # ─────────────────────────────────────────────────────────
 
 def fetch_stock_data(tickers, start, end, output_dir):
     """
-    Downloads daily price history for a list of stock tickers
-    and saves each one as its own CSV file.
+    Downloads daily price history for all S&P 500 tickers.
+    Skips tickers that already have a saved CSV file so
+    you can resume if the download gets interrupted.
     """
-    print("\n📈 Fetching stock price data...")
+    print("📈 Fetching stock price data for all S&P 500 stocks...")
+    print(f"   This will take approximately 15-25 minutes\n")
 
-    # Make sure the output folder exists
     os.makedirs(output_dir, exist_ok=True)
 
-    for ticker in tickers:
-        print(f"  Downloading {ticker}...")
+    success_count  = 0
+    skip_count     = 0
+    fail_count     = 0
+    failed_tickers = []
 
-        # yfinance does all the heavy lifting here
-        # It pulls data straight from Yahoo Finance for free
-        stock = yf.download(
-            ticker,
-            start=start,
-            end=end,
-            auto_adjust=True,   # adjusts prices for splits/dividends automatically
-            progress=False      # silences the download progress bar
-        )
+    for i, ticker in enumerate(tickers):
+        filepath = os.path.join(output_dir, f"{ticker}.csv")
 
-        # yfinance sometimes returns multi-level columns — flatten them
-        if isinstance(stock.columns, pd.MultiIndex):
-            stock.columns = stock.columns.get_level_values(0)
-
-        if stock.empty:
-            print(f"  ⚠️  No data found for {ticker}, skipping.")
+        # RESUME FEATURE: skip if we already downloaded this one
+        if os.path.exists(filepath):
+            skip_count += 1
             continue
 
-        # Add the ticker name as a column so we know which stock it is later
-        stock["Ticker"] = ticker
+        # Progress indicator every 10 stocks
+        if (i + 1) % 10 == 0 or i == 0:
+            pct = ((i + 1) / len(tickers)) * 100
+            print(f"   Progress: {i+1}/{len(tickers)} ({pct:.0f}%) | "
+                  f"✅ {success_count} saved | ❌ {fail_count} failed")
 
-        # Also calculate a few simple features while we're here:
+        try:
+            stock = yf.download(
+                ticker,
+                start=start,
+                end=end,
+                auto_adjust=True,
+                progress=False
+            )
 
-        # Daily return: how much % did the stock move each day?
-        # e.g. +0.02 means it went up 2% that day
-        stock["Daily_Return"] = stock["Close"].pct_change()
+            # Flatten multi-level columns if present
+            if isinstance(stock.columns, pd.MultiIndex):
+                stock.columns = stock.columns.get_level_values(0)
 
-        # 20-day moving average: smooths out noise, shows the trend
-        stock["MA_20"] = stock["Close"].rolling(window=20).mean()
+            # Skip if no data came back
+            if stock.empty or len(stock) < 100:
+                failed_tickers.append(ticker)
+                fail_count += 1
+                continue
 
-        # 50-day moving average: longer-term trend
-        stock["MA_50"] = stock["Close"].rolling(window=50).mean()
+            # Add ticker column and basic features
+            stock["Ticker"]        = ticker
+            stock["Daily_Return"]  = stock["Close"].pct_change()
+            stock["MA_20"]         = stock["Close"].rolling(window=20).mean()
+            stock["MA_50"]         = stock["Close"].rolling(window=50).mean()
+            stock["Volatility_20"] = stock["Daily_Return"].rolling(window=20).std()
 
-        # Volatility: how wildly does the stock swing?
-        # Measured as the standard deviation of daily returns over 20 days
-        stock["Volatility_20"] = stock["Daily_Return"].rolling(window=20).std()
+            stock.to_csv(filepath)
+            success_count += 1
 
-        # Save to CSV
-        filepath = os.path.join(output_dir, f"{ticker}.csv")
-        stock.to_csv(filepath)
-        print(f"  ✅ Saved {len(stock)} rows → {filepath}")
+            # Small delay to avoid getting rate-limited by Yahoo Finance
+            time.sleep(DELAY_BETWEEN_DOWNLOADS)
 
-    print("Stock data download complete!\n")
+        except Exception as e:
+            failed_tickers.append(ticker)
+            fail_count += 1
+            time.sleep(1)
+
+    print(f"\n   ✅ Downloaded:  {success_count} stocks")
+    print(f"   ⏭️  Skipped (already existed): {skip_count} stocks")
+    print(f"   ❌ Failed:     {fail_count} stocks")
+
+    if failed_tickers:
+        print(f"   Failed tickers: {failed_tickers}")
+
+    # Save list of successfully downloaded tickers for reference
+    all_csvs = [f.replace(".csv", "") for f in os.listdir(output_dir)
+                if f.endswith(".csv") and f != "macro_data.csv"]
+    tickers_path = os.path.join(output_dir, "_downloaded_tickers.txt")
+    with open(tickers_path, "w") as f:
+        f.write("\n".join(sorted(all_csvs)))
+    print(f"   📋 Ticker list saved → {tickers_path}\n")
+
+    return all_csvs
 
 
 # ─────────────────────────────────────────────────────────
 #  PART 2: PULL MACRO ECONOMIC DATA FROM FRED
-#  These are the "big picture" economic signals
-#  that affect the entire market
+#  Same as before — this part is fast (under 30 seconds)
 # ─────────────────────────────────────────────────────────
 
 def fetch_macro_data(api_key, start, end, output_dir):
     """
-    Downloads key macroeconomic indicators from the
-    Federal Reserve's free FRED database.
+    Downloads key macroeconomic indicators from FRED.
+    Skips if already downloaded.
     """
     print("🌍 Fetching macroeconomic data from FRED...")
 
+    macro_path = os.path.join(output_dir, "macro_data.csv")
+    if os.path.exists(macro_path):
+        print("   ⏭️  Macro data already exists, skipping download\n")
+        return
+
     if not api_key:
-        print("  ⚠️  No FRED API key found. Skipping macro data.")
-        print("  Get a free key at: https://fred.stlouisfed.org/docs/api/api_key.html")
+        print("   ⚠️  No FRED API key found. Skipping macro data.")
         return
 
     fred = Fred(api_key=api_key)
 
-    # Each entry is: "series_id": "friendly name"
-    # FRED series IDs are their internal codes — these are the most useful ones
     macro_series = {
-        "DFF":     "Fed_Funds_Rate",       # Interest rate the Fed charges banks (huge market driver)
-        "T10Y2Y":  "Yield_Curve",          # 10yr minus 2yr treasury — negative = recession warning
-        "CPIAUCSL":"Inflation_CPI",        # Consumer Price Index — measures inflation
-        "UNRATE":  "Unemployment_Rate",    # % of people without jobs
-        "GDP":     "GDP_Growth",           # Total economic output (quarterly)
-        "VIXCLS":  "VIX_Fear_Index",       # Market fear/volatility index — spikes during crashes
-        "DTWEXBGS":"Dollar_Strength",      # US dollar strength vs other currencies
+        "DFF":     "Fed_Funds_Rate",
+        "T10Y2Y":  "Yield_Curve",
+        "CPIAUCSL":"Inflation_CPI",
+        "UNRATE":  "Unemployment_Rate",
+        "GDP":     "GDP_Growth",
+        "VIXCLS":  "VIX_Fear_Index",
+        "DTWEXBGS":"Dollar_Strength",
     }
 
     all_macro = pd.DataFrame()
 
     for series_id, friendly_name in macro_series.items():
-        print(f"  Downloading {friendly_name} ({series_id})...")
-
+        print(f"   Downloading {friendly_name}...")
         try:
             series = fred.get_series(
                 series_id,
                 observation_start=start,
                 observation_end=end
             )
-
-            # Convert to a nice DataFrame column
             df = series.to_frame(name=friendly_name)
             all_macro = pd.concat([all_macro, df], axis=1)
-            print(f"  ✅ Got {len(df)} data points")
-
+            print(f"   ✅ {friendly_name}: {len(df)} data points")
         except Exception as e:
-            print(f"  ⚠️  Could not fetch {series_id}: {e}")
+            print(f"   ⚠️  Could not fetch {series_id}: {e}")
 
     if all_macro.empty:
-        print("  No macro data was downloaded.")
         return
 
-    # FRED data comes in different frequencies (daily, monthly, quarterly)
-    # We forward-fill so every calendar day has a value
-    # e.g. GDP is only reported quarterly, so we repeat that value for each day
-    # until the next quarterly update comes in
     all_macro = all_macro.resample("D").interpolate(method="time")
-
-    # Trim to our date range
     all_macro = all_macro.loc[start:end]
+    all_macro.to_csv(macro_path)
 
-    # Save all macro data in one file
-    filepath = os.path.join(output_dir, "macro_data.csv")
-    all_macro.to_csv(filepath)
-    print(f"\n✅ Macro data saved → {filepath}")
-    print(f"   Shape: {all_macro.shape[0]} rows × {all_macro.shape[1]} columns\n")
+    print(f"\n   ✅ Macro data saved → {macro_path}")
+    print(f"      Shape: {all_macro.shape[0]} rows × {all_macro.shape[1]} columns\n")
 
 
 # ─────────────────────────────────────────────────────────
 #  PART 3: COMBINE EVERYTHING INTO ONE MASTER DATASET
-#  Merge each stock's data with the macro data
-#  so every row has both stock info + economic context
+#  Processes in batches of 50 to keep memory usage low
 # ─────────────────────────────────────────────────────────
 
-def combine_data(tickers, output_dir):
+def combine_data(downloaded_tickers, output_dir):
     """
-    Merges each stock's price data with the macro data
-    and saves a single combined master CSV.
+    Merges all stock CSVs with macro data into one master file.
+    Processes in batches of 50 stocks to keep memory usage low.
     """
-    print("🔗 Combining stock + macro data...")
+    print("🔗 Combining stock + macro data into master dataset...")
+    print("   Processing in batches of 50 stocks to manage memory...\n")
 
-    # Load macro data
     macro_path = os.path.join(output_dir, "macro_data.csv")
     if not os.path.exists(macro_path):
-        print("  ⚠️  No macro data found. Skipping combination step.")
+        print("   ⚠️  No macro data found. Skipping.")
         return
 
     macro = pd.read_csv(macro_path, index_col=0, parse_dates=True)
 
-    all_stocks = []
-
-    for ticker in tickers:
-        stock_path = os.path.join(output_dir, f"{ticker}.csv")
-        if not os.path.exists(stock_path):
-            continue
-
-        stock = pd.read_csv(stock_path, index_col=0, parse_dates=True)
-
-        # Merge: match each stock's date with the macro data on that same date
-        # "left" join means we keep all stock dates even if macro data is missing
-        combined = stock.merge(macro, left_index=True, right_index=True, how="left")
-
-        all_stocks.append(combined)
-
-    if not all_stocks:
-        print("  No stock data found to combine.")
-        return
-
-    # Stack all stocks into one big dataset
-    master = pd.concat(all_stocks)
-
-    # Save the master file
     processed_dir = output_dir.replace("raw", "processed")
     os.makedirs(processed_dir, exist_ok=True)
-    filepath = os.path.join(processed_dir, "master_dataset.csv")
-    master.to_csv(filepath)
+    master_path = os.path.join(processed_dir, "master_dataset.csv")
 
-    print(f"✅ Master dataset saved → {filepath}")
-    print(f"   {len(tickers)} stocks × {len(master)} total rows")
-    print(f"   Columns: {list(master.columns)}\n")
+    BATCH_SIZE = 50
+    batches    = [downloaded_tickers[i:i+BATCH_SIZE]
+                  for i in range(0, len(downloaded_tickers), BATCH_SIZE)]
+
+    first_batch = True
+    total_rows  = 0
+
+    for batch_num, batch in enumerate(batches):
+        print(f"   Batch {batch_num+1}/{len(batches)}: merging {len(batch)} stocks...")
+        batch_frames = []
+
+        for ticker in batch:
+            stock_path = os.path.join(output_dir, f"{ticker}.csv")
+            if not os.path.exists(stock_path):
+                continue
+            try:
+                stock    = pd.read_csv(stock_path, index_col=0, parse_dates=True)
+                combined = stock.merge(
+                    macro, left_index=True, right_index=True, how="left"
+                )
+                batch_frames.append(combined)
+            except Exception as e:
+                print(f"     ⚠️  Error processing {ticker}: {e}")
+
+        if not batch_frames:
+            continue
+
+        batch_df    = pd.concat(batch_frames)
+        total_rows += len(batch_df)
+
+        # Write header only on first batch, append the rest
+        batch_df.to_csv(
+            master_path,
+            mode="w" if first_batch else "a",
+            header=first_batch
+        )
+        first_batch = False
+        print(f"   ✅ Batch {batch_num+1} done ({len(batch_df):,} rows)")
+
+    print(f"\n✅ Master dataset complete → {master_path}")
+    print(f"   Total: {len(downloaded_tickers)} stocks | {total_rows:,} rows\n")
 
 
 # ─────────────────────────────────────────────────────────
@@ -235,18 +279,22 @@ def combine_data(tickers, output_dir):
 
 if __name__ == "__main__":
     print("=" * 55)
-    print("  Stock AI — Data Pipeline Starting")
+    print("  Stock AI — S&P 500 Data Pipeline")
     print("=" * 55)
 
-    # Step 1: Download all stock price data
-    fetch_stock_data(STOCKS, START_DATE, END_DATE, OUTPUT_DIR)
+    # Get full S&P 500 ticker list from Wikipedia
+    tickers = get_sp500_tickers()
 
-    # Step 2: Download macro economic data
+    # Download all stock data (resumes automatically if interrupted)
+    downloaded = fetch_stock_data(tickers, START_DATE, END_DATE, OUTPUT_DIR)
+
+    # Download macro data (skips if already done)
     fetch_macro_data(FRED_API_KEY, START_DATE, END_DATE, OUTPUT_DIR)
 
-    # Step 3: Merge everything into one master dataset
-    combine_data(STOCKS, OUTPUT_DIR)
+    # Combine everything into one master dataset
+    combine_data(downloaded, OUTPUT_DIR)
 
     print("=" * 55)
     print("  Pipeline complete! Check your data/ folder.")
+    print(f"  Stocks downloaded: {len(downloaded)}")
     print("=" * 55)
