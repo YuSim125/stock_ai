@@ -7,3 +7,7 @@ fredapi
 xgboost
 scikit-learn
 matplotlib
+torch
+streamlit
+plotly
+pyportfolioopt
