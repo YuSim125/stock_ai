@@ -1,3 +1,7 @@
+🚀 **Live Demo:** [simon-stockai.streamlit.app](https://simon-stockai.streamlit.app)
+
+---
+
 # Stock AI — ML-Powered Stock Recommendation System
 
 An end-to-end machine learning system that ingests market and
