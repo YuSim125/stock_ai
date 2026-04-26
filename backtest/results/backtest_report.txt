@@ -1,0 +1,28 @@
+
+STOCK AI — BACKTEST REPORT
+Generated: 2026-04-25 21:16
+Period: 2023-01-01 to 2024-12-31
+Starting Capital: $10,000
+=======================================================
+
+PERFORMANCE SUMMARY
+───────────────────────────────────────────────────────
+Metric                   AI Model      SPY B&H       Random
+───────────────────────────────────────────────────────
+Total Return                18.5%        62.1%        67.9%
+Annual Return                9.3%        28.9%        31.3%
+Sharpe Ratio                0.886        2.057        2.117
+Max Drawdown               -15.0%       -10.0%       -10.4%
+Win Rate                    51.9%        57.9%        56.0%
+Final Value               $11,840      $16,214      $16,787
+
+Alpha vs SPY: -43.6%
+Rebalances:   24
+=======================================================
+
+SETTINGS USED
+───────────────────────────────────────────────────────
+Stocks per bundle:   10
+Rebalance frequency: every 20 trading days
+Min confidence:      0.55
+Transaction cost:    0.1% per rebalance
